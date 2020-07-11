@@ -1,0 +1,73 @@
+;; The symbols + (43) and - (45) can be represented as bits.
+;; You can get the char with the formula 43 + 2*n.
+(deftype mix-sign () 'bit)
+
+;; also called a nybble
+(deftype mix-half-byte () '(unsigned-byte 3))
+
+;; exactly fits in a half word
+(defstruct mix-half-word
+  (sign 0 :type mix-sign)
+  (contents (make-array 2 :element-type 'mix-byte)))
+
+;; as in the Google Common Lisp style guide is advised
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun fix-positive-half-word-p (word)
+    (when (mix-half-word-p word)
+      ;; The sign must bei +, so the value constant 0.
+      (= 0 (mix-half-word-sign word)))))
+
+;; type for the rJ register, always positive signed
+(deftype rJ-word ()
+  '(and mix-half-word (satisfies fix-positive-half-word-p)))
+
+;; It might be unusually to you, but a byte in MIX is 6 bits long.
+(deftype mix-full-byte () '(unsigned-byte 6))
+
+(defstruct mix-full-word
+  (sign 0 :type mix-sign)
+  (contents (make-array 5 :element-type 'mix-byte)))
+
+(defstruct mix-machine
+  ;; REGISTERS
+  ;; accumulator register, five bytes plus sign
+  (rA (make-mix-full-word) :type mix-full-word)
+  ;; extension register, five bytes plus sign
+  (rX (make-mix-full-word) :type mix-full-word)
+  ;; index registers, two bytes plus sign
+  (rI1 (make-mix-half-word) :type mix-half-word)
+  (rI2 (make-mix-half-word) :type mix-half-word)
+  (rI3 (make-mix-half-word) :type mix-half-word)
+  (rI4 (make-mix-half-word) :type mix-half-word)
+  (rI5 (make-mix-half-word) :type mix-half-word)
+  (rI6 (make-mix-half-word) :type mix-half-word)
+  ;; jump address register, holds two bytes, sign always +
+  (rJ  (make-mix-half-word) :type rJ-word)
+  ;; overflow toggle, 0 or 1
+  (overflow-toggle 0 :type bit)
+  ;; comparison indicator
+  ;; we have '((< . -1) (= . 0) (> . 1))
+  ;; Since the char-codes are 60, 61, 62 we get the values by the formula 61 + n.
+  (comparison-indicator 0 :type (integer -1 1))
+  ;; memory cells
+  ;; MIX has 4000 memory congruent memeory cells of 6 MIX-Bytes
+  (memory-cells (make-array
+                 4000
+                 :initial-element (make-array 6 :element-type 'mix-full-byte)
+                 :element-type '(simple-array mix-full-byte (6)))
+   :type (simple-array (simple-array mix-full-byte (6)) (4000)))
+  ;; Is the rest RAM?
+  ;; magnetic tape units
+  (magnetic-tape-units (make-array 8 :element-type 'mix-full-byte)
+   :type (simple-array mix-full-byte (8)))
+  ;; disk and drums
+  (disk-and-drums (make-array 8 :element-type 'mix-full-byte)
+   :type (simple-array mix-full-byte (8)))
+  ;; card reader
+  (card-reader  0 :type mix-full-byte)
+  ;; card punch
+  (card-punch   0 :type mix-full-byte)
+  ;; line printer
+  (line-printer 0 :type mix-full-byte)
+  ;; paper tape
+  (paper-tape   0 :type mix-full-byte))
