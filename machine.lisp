@@ -1,73 +1,122 @@
-;; The symbols + (43) and - (45) can be represented as bits.
-;; You can get the char with the formula 43 + 2*n.
-(deftype mix-sign () 'bit)
+(deftype mix-bit  () 'bit)
+(deftype mix-sign () 'mix-bit)
 
-;; also called a nybble
-(deftype mix-half-byte () '(unsigned-byte 3))
+(deftype mix-byte (bits) `(simple-array mix-bit (,bits)))
+(deftype mix-half-byte () '(mix-byte 3))
+(deftype mix-full-byte () '(mix-byte 6))
 
-;; exactly fits in a half word
-(defstruct mix-half-word
-  (sign 0 :type mix-sign)
-  (contents (make-array 2 :element-type 'mix-byte)))
+(let ((alist '((2 . mix-half-word)
+               (5 . mix-full-word))))
+  (macrolet
+      ((defword (bytes)
+         (let* ((elem (assoc bytes alist :test '=))
+                (name (cdr elem)))
+           `(defstruct ,name
+              (sign 0 :type mix-sign)
+              (contents (make-array ,bytes :element-type 'mix-full-byte))))))
+    (dolist (n '(2 5)) `(defword ,n))))
 
-;; as in the Google Common Lisp style guide is advised
+(defgeneric sign (word))
+
+(let ((alist '(
+               ;; bytes
+               (mhb . mix-half-byte)
+               (mfb . mix-full-byte)
+               ;; words
+               (mhw . mix-half-word)
+               (mfw . mix-full-word)
+               )))
+  (dolist (elem alist)
+    `(define-symbol-macro ,(car elem) ',(cdr elem))))
+
+(defun sign-char (bit)
+  "Calculate the corresponding char to a sign bit for a half or full word."
+  (declare (type mix-sign bit))
+  (code-char
+   ;; The formula 43 + 2*n.
+   (+ 43 (* 2 bit))))
+
+(let ((control-string "[ ~c | ~{~b~} ]")
+      (alist '((3 . (mix-half-word
+                     mix-half-word-sign
+                     mix-half-word-contents))
+               (6 . (mix-full-word
+                     mix-full-word-sign
+                     mix-full-word-contents)))))
+  (macrolet
+      ((print-word (length)
+         (let ((lst (assoc 3 alist))
+               (word (gensym "WORD"))
+               (sign (gensym "SIGN"))
+               (plus/minus (gensym "PLUS/MINUS"))
+               (contents (gensym "CONTENTS")))
+           `(defmethod print-object ((,word ,(first lst)) stream)
+              (let* ((,sign (,(second lst) ,word))
+                     (,plus/minus (sign-char ,sign)))
+                (let ((,contents (,(third lst) ,word)))
+                  (format stream
+                          ,control-string
+                          ,plus/minus ,contents)))))))
+    (dolist (len '(3 6)) (print-word len))))
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun fix-positive-half-word-p (word)
+  (defun rJ-word-p (word)
+    "Is WORD an rJ-word? Means just being positive fixed."
     (when (mix-half-word-p word)
       ;; The sign must bei +, so the value constant 0.
       (= 0 (mix-half-word-sign word)))))
 
 ;; type for the rJ register, always positive signed
 (deftype rJ-word ()
-  '(and mix-half-word (satisfies fix-positive-half-word-p)))
+  '(and mix-half-word (satisfies rJ-word-p)))
 
-;; It might be unusually to you, but a byte in MIX is 6 bits long.
-(deftype mix-full-byte () '(unsigned-byte 6))
+(macrolet ((index-register (reg)
+             `(,reg (make-mix-half-word) :type mhw)))
+  (defstruct mix-machine
+  ;;; REGISTERS
+    ;; accumulator register, five bytes plus sign
+    (rA (make-mix-full-word) :type mfw)
+    ;; Extension Register
+    ;; five bytes plus sign
+    (rX (make-mix-full-word) :type mfw)
+    ;; Index Registers
+    ;; two bytes plus sign
+    (dolist (reg '(rI1 rI2 rI3 rI4 rI5 rI6))
+      (index-register reg))
+    ;; Jump Address Register
+    ;; holds two bytes, sign always +
+    (rJ  (make-mix-half-word) :type rJ-word)
+    ;; Overflow Toggle
+    (overflow-toggle 0 :type bit)
+    ;; Comparison Indicator
+    ;; we have '((< . -1) (= . 0) (> . 1))
+    (comparison-indicator 0 :type (integer -1 1))
+  ;;; Memory Cells
+    ;; MIX has 4000 congruent memory cells of 6 MIX-Bytes.
+    (memory-cells
+     (make-array 4000
+                 :initial-element (make-array 6 :element-type 'mfb)
+                 :element-type '(simple-array mfb (6)))
+     :type (simple-array (simple-array mfb (6)) (4000)))
+  ;;; Is the rest RAM?
+    ;; Magnetic Tape Units
+    (magnetic-tape-units (make-array 8 :element-type 'mfb)
+     :type (simple-array mfb (8)))
+    ;; Disk and Drums
+    (disk-and-drums (make-array 8 :element-type 'mfb)
+     :type (simple-array mfb (8)))
+    ;; Card Reader
+    (card-reader 0 :type mfb)
+    ;; Card Punch
+    (card-punch 0 :type mfb)
+    ;; Line Printer
+    (line-printer 0 :type mfb)
+    ;; Paper Tape
+    (paper-tape 0 :type mfb)))
 
-(defstruct mix-full-word
-  (sign 0 :type mix-sign)
-  (contents (make-array 5 :element-type 'mix-byte)))
-
-(defstruct mix-machine
-  ;; REGISTERS
-  ;; accumulator register, five bytes plus sign
-  (rA (make-mix-full-word) :type mix-full-word)
-  ;; extension register, five bytes plus sign
-  (rX (make-mix-full-word) :type mix-full-word)
-  ;; index registers, two bytes plus sign
-  (rI1 (make-mix-half-word) :type mix-half-word)
-  (rI2 (make-mix-half-word) :type mix-half-word)
-  (rI3 (make-mix-half-word) :type mix-half-word)
-  (rI4 (make-mix-half-word) :type mix-half-word)
-  (rI5 (make-mix-half-word) :type mix-half-word)
-  (rI6 (make-mix-half-word) :type mix-half-word)
-  ;; jump address register, holds two bytes, sign always +
-  (rJ  (make-mix-half-word) :type rJ-word)
-  ;; overflow toggle, 0 or 1
-  (overflow-toggle 0 :type bit)
-  ;; comparison indicator
-  ;; we have '((< . -1) (= . 0) (> . 1))
-  ;; Since the char-codes are 60, 61, 62 we get the values by the formula 61 + n.
-  (comparison-indicator 0 :type (integer -1 1))
-  ;; memory cells
-  ;; MIX has 4000 memory congruent memeory cells of 6 MIX-Bytes
-  (memory-cells (make-array
-                 4000
-                 :initial-element (make-array 6 :element-type 'mix-full-byte)
-                 :element-type '(simple-array mix-full-byte (6)))
-   :type (simple-array (simple-array mix-full-byte (6)) (4000)))
-  ;; Is the rest RAM?
-  ;; magnetic tape units
-  (magnetic-tape-units (make-array 8 :element-type 'mix-full-byte)
-   :type (simple-array mix-full-byte (8)))
-  ;; disk and drums
-  (disk-and-drums (make-array 8 :element-type 'mix-full-byte)
-   :type (simple-array mix-full-byte (8)))
-  ;; card reader
-  (card-reader  0 :type mix-full-byte)
-  ;; card punch
-  (card-punch   0 :type mix-full-byte)
-  ;; line printer
-  (line-printer 0 :type mix-full-byte)
-  ;; paper tape
-  (paper-tape   0 :type mix-full-byte))
+(defun comparison-indicator-char (toggle)
+  "Gets you the corresponding char of the comparison indicator."
+  (declare (type (integer -1 1) toggle))
+  (code-char
+   ;; The formula 61 + n.
+   (+ 61 toggle)))
